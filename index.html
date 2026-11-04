@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Geospatial Graph Generator for Flood Simulation</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: #0f1117; color: #e6edf3; padding: 30px; display: flex; justify-content: center; }
+    .container { width: 100%; max-width: 900px; display: flex; flex-direction: column; gap: 20px; }
+    h1 { font-size: 24px; color: #58a6ff; }
+    p.subtitle { color: #8b949e; font-size: 14px; }
+    
+    .search-box { position: relative; width: 100%; }
+    input[type="text"] {
+      width: 100%;
+      padding: 14px 18px;
+      font-size: 16px;
+      border-radius: 8px;
+      background: #161b22;
+      border: 1px solid #30363d;
+      color: #fff;
+      outline: none;
+    }
+    input[type="text"]:focus { border-color: #58a6ff; }
+    
+    .dropdown {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-top: none;
+      border-radius: 0 0 8px 8px;
+      max-height: 250px;
+      overflow-y: auto;
+      z-index: 10;
+      display: none;
+    }
+    .dropdown-item {
+      padding: 12px 16px;
+      cursor: pointer;
+      font-size: 14px;
+      border-bottom: 1px solid #21262d;
+    }
+    .dropdown-item:hover { background-color: #1f242c; color: #58a6ff; }
+    
+    .status { font-size: 14px; color: #f0883e; display: none; margin-top: 5px; }
+    
+    .results-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 20px;
+      display: none;
+    }
+    .preview-container {
+      width: 100%;
+      background: #000;
+      border-radius: 6px;
+      overflow: hidden;
+      margin-top: 15px;
+      text-align: center;
+    }
+    .preview-container img {
+      width: 100%;
+      max-height: 480px;
+      object-fit: contain;
+    }
+    
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin-top: 15px;
+    }
+    .metric-card {
+      background: #0d1117;
+      padding: 12px;
+      border-radius: 6px;
+      border: 1px solid #21262d;
+    }
+    .metric-title { font-size: 12px; color: #8b949e; text-transform: uppercase; }
+    .metric-value { font-size: 18px; font-weight: bold; color: #58a6ff; margin-top: 4px; }
+    
+    .download-btn {
+      display: inline-block;
+      margin-top: 15px;
+      padding: 10px 20px;
+      background: #238636;
+      color: #fff;
+      text-decoration: none;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 14px;
+    }
+    .download-btn:hover { background: #2ea043; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div>
+      <h1>India Regional Graph Generator</h1>
+      <p class="subtitle">Extracts official administrative boundaries with autonomous satellite fallback for flood simulations</p>
+    </div>
+
+    <div class="search-box">
+      <input type="text" id="searchInput" placeholder="Type an Indian village, town, or locality (e.g. Kapashera, Delhi)..." autocomplete="off" />
+      <div id="dropdown" class="dropdown"></div>
+      <div id="statusMsg" class="status"></div>
+    </div>
+
+    <div id="resultsCard" class="results-card">
+      <h2>Topological Graph Preview</h2>
+      <div class="preview-container">
+        <img id="graphImg" src="" alt="Graph Preview" />
+      </div>
+
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-title">Nodes / Intersections</div>
+          <div id="mNodes" class="metric-value">-</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-title">Edges / Road Segments</div>
+          <div id="mEdges" class="metric-value">-</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-title">Total Length</div>
+          <div id="mLength" class="metric-value">-</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-title">Road Density</div>
+          <div id="mDensity" class="metric-value">-</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-title">Reachability</div>
+          <div id="mReach" class="metric-value">-</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-title">Accuracy Index</div>
+          <div id="mScore" class="metric-value">-</div>
+        </div>
+      </div>
+
+      <a id="downloadBtn" href="/api/download-graphml" class="download-btn">Download .graphml for Simulation</a>
+    </div>
+  </div>
+
+  <script>
+    const searchInput = document.getElementById("searchInput");
+    const dropdown = document.getElementById("dropdown");
+    const statusMsg = document.getElementById("statusMsg");
+    const resultsCard = document.getElementById("resultsCard");
+
+    let debounceTimer;
+
+    searchInput.addEventListener("input", () => {
+      clearTimeout(debounceTimer);
+      const query = searchInput.value.trim();
+      if (query.length < 2) {
+        dropdown.style.display = "none";
+        return;
+      }
+      debounceTimer = setTimeout(() => fetchSuggestions(query), 300);
+    });
+
+    async function fetchSuggestions(query) {
+      try {
+        const res = await fetch(`/api/autocomplete?q=${encodeURIComponent(query)}`);
+        const data = await res.json();
+        dropdown.innerHTML = "";
+        
+        if (data.suggestions && data.suggestions.length > 0) {
+          data.suggestions.forEach(item => {
+            const div = document.createElement("div");
+            div.className = "dropdown-item";
+            div.textContent = item.display_name;
+            div.onclick = () => selectPlace(item.data, item.display_name);
+            dropdown.appendChild(div);
+          });
+          dropdown.style.display = "block";
+        } else {
+          dropdown.style.display = "none";
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    async function selectPlace(placeData, displayName) {
+      dropdown.style.display = "none";
+      searchInput.value = displayName;
+      statusMsg.style.display = "block";
+      statusMsg.textContent = "Extracting boundary and generating network graph... please wait.";
+      resultsCard.style.display = "none";
+
+      try {
+        const res = await fetch("/api/generate-graph", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(placeData)
+        });
+        const result = await res.json();
+
+        if (result.status === "success") {
+          statusMsg.style.display = "none";
+          resultsCard.style.display = "block";
+          
+          document.getElementById("graphImg").src = result.preview_url;
+          document.getElementById("mNodes").textContent = result.metrics.total_nodes;
+          document.getElementById("mEdges").textContent = result.metrics.total_edges;
+          document.getElementById("mLength").textContent = result.metrics.total_length_km + " km";
+          document.getElementById("mDensity").textContent = result.metrics.road_density_km_per_sq_km + " km/km²";
+          document.getElementById("mReach").textContent = result.metrics.reachability_score_percent + "%";
+          document.getElementById("mScore").textContent = result.metrics.topological_accuracy_score + "%";
+        } else {
+          statusMsg.textContent = "Error: " + result.message;
+        }
+      } catch (err) {
+        statusMsg.textContent = "Generation failed: " + err.message;
+      }
+    }
+  </script>
+</body>
+</html>

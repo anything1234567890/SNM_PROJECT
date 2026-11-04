@@ -1,0 +1,32 @@
+# Virtual environment
+venv/
+env/
+ENV/
+.venv/
+
+# Python cache & bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# Generated graph outputs & image previews
+*.graphml
+*.png
+*.jpg
+*.jpeg
+*.svg
+static/*.graphml
+static/*.png
+static/*.jpg
+
+# OS & Editor generated files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+.vscode/
+.idea/
+
+# Jupyter / Checkpoints
+.ipynb_checkpoints/
