@@ -1,5 +1,9 @@
 import networkx as nx
+import matplotlib
+matplotlib.use("Agg")  # Thread-safe headless backend for FastAPI / Uvicorn
 import matplotlib.pyplot as plt
+import networkx as nx
+
 
 def calculate_graph_metrics(G, bbox):
     """
