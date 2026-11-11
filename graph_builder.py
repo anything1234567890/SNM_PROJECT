@@ -6,6 +6,11 @@ from shapely.geometry import shape, Polygon
 from satellite_extractor import fetch_satellite_image, extract_road_skeleton, skeleton_to_graph
 from metrics_and_viz import calculate_graph_metrics, export_graph_image
 
+# --- ADD THESE 3 LINES HERE ---
+ox.settings.timeout = 60
+ox.settings.use_cache = True
+ox.settings.overpass_endpoint = "https://overpass.kumi.systems/api/interpreter"
+
 def search_india_places(query_text: str, limit: int = 5):
     url = "https://nominatim.openstreetmap.org/search"
     params = {
@@ -76,6 +81,13 @@ def build_graph_for_place(place_data: dict, output_path: str = "output_graph.gra
         sat_img = fetch_satellite_image(bbox)
         skeleton = extract_road_skeleton(sat_img)
         G = skeleton_to_graph(skeleton, bbox)
+
+        # --- ADD THESE 4 LINES RIGHT HERE ---
+        # Ensure satellite graph also isolates the single main connected component
+        undirected_sat = G.to_undirected()
+        main_nodes = max(nx.connected_components(undirected_sat), key=len)
+        G = G.subgraph(main_nodes).copy()
+        # ------------------------------------
 
     # Clean attributes for GraphML compatibility
     for _, _, data in G.edges(data=True):
