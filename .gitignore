@@ -1,15 +1,22 @@
-# Virtual environment
+# OS & Editor generated files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+.vscode/
+.idea/
+
+# Virtual environment & Python cache
 venv/
 env/
 ENV/
 .venv/
-
-# Python cache & bytecode
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .pytest_cache/
+cache/
+flood_data/
 
 # Generated graph outputs & image previews
 *.graphml
@@ -21,19 +28,5 @@ static/*.graphml
 static/*.png
 static/*.jpg
 
-# OS & Editor generated files
-.DS_Store
-Thumbs.db
-ehthumbs.db
-.vscode/
-.idea/
-
-# Jupyter / Checkpoints
-.ipynb_checkpoints/outputs/
-cache/
-outputs/
-cache/
-outputs/
-cache/
-flood_data/
+# Ignore ONLY the oversized HTML file, allowing all other outputs to be tracked
 outputs/Shahdara_to_Kashmere_Gate.html
