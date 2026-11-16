@@ -30,6 +30,7 @@ def build_graph_for_place(place_data: dict, output_path: str = "output_graph.gra
     display_name = place_data["display_name"]
     print(f"\nProcessing region: {display_name}")
     
+    
     bbox_raw = place_data.get("boundingbox")
     south, north, west, east = [float(coord) for coord in bbox_raw]
     bbox = [south, north, west, east]
