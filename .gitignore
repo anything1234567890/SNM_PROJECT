@@ -29,4 +29,10 @@ ehthumbs.db
 .idea/
 
 # Jupyter / Checkpoints
-.ipynb_checkpoints/
+.ipynb_checkpoints/outputs/
+cache/
+outputs/
+cache/
+outputs/
+cache/
+flood_data/
