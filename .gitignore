@@ -16,6 +16,7 @@ __pycache__/
 *.so
 .pytest_cache/
 cache/
+dem_cache/
 flood_data/
 
 # Generated graph outputs & image previews

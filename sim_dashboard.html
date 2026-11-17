@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Flood Resilience & Tactical Evacuation Command Center</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Roboto, monospace; }
+    body { background: #0a0e14; color: #e6edf3; display: flex; height: 100vh; overflow: hidden; }
+
+    #map-container { flex: 1; position: relative; }
+    #map { width: 100%; height: 100%; background: #0d1117; cursor: crosshair; }
+
+    #hud-top {
+      position: absolute; top: 14px; left: 55px; z-index: 1000;
+      background: rgba(13, 17, 23, 0.94); border: 1px solid #30363d;
+      padding: 10px 18px; border-radius: 8px; display: flex; gap: 20px; align-items: center;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.7);
+    }
+    .hud-badge { font-size: 12px; color: #8b949e; }
+    .hud-badge span { color: #58a6ff; font-weight: bold; font-size: 14px; }
+    .alert-pill {
+      padding: 4px 10px; border-radius: 4px; font-size: 12px; font-weight: bold;
+      background: #1f6feb33; color: #58a6ff; border: 1px solid #1f6feb;
+    }
+    .alert-pill.danger {
+      background: #da363333; color: #ff7b72; border-color: #f85149;
+      animation: pulse 0.9s infinite;
+    }
+    .alert-pill.survived {
+      background: #23863644; color: #3fb950; border-color: #2ea043;
+    }
+
+    #mission-banner {
+      display: none; position: absolute; bottom: 28px; left: 50%; transform: translateX(-50%);
+      z-index: 1000; padding: 14px 28px; border-radius: 10px; font-size: 15px; font-weight: bold;
+      letter-spacing: 0.5px; box-shadow: 0 8px 30px rgba(0,0,0,0.85); text-align: center;
+    }
+    #mission-banner.win { background: rgba(22, 65, 34, 0.96); border: 2px solid #3fb950; color: #3fb950; }
+    #mission-banner.loss { background: rgba(78, 20, 24, 0.96); border: 2px solid #f85149; color: #ff7b72; }
+
+    @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.45; } 100% { opacity: 1; } }
+
+    #sidebar {
+      width: 400px; background: #161b22; border-left: 1px solid #30363d;
+      display: flex; flex-direction: column; padding: 14px; gap: 12px; overflow-y: auto;
+    }
+    h2 { font-size: 15px; color: #58a6ff; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid #30363d; padding-bottom: 8px; }
+    .card { background: #0d1117; border: 1px solid #30363d; border-radius: 8px; padding: 11px; }
+    .card-title { font-size: 11px; color: #8b949e; text-transform: uppercase; margin-bottom: 7px; font-weight: bold; display: flex; justify-content: space-between; align-items: center; }
+
+    .btn-row { display: flex; gap: 8px; margin-top: 8px; }
+    button {
+      flex: 1; padding: 8px 10px; border: 1px solid #30363d; border-radius: 6px;
+      background: #21262d; color: #c9d1d9; cursor: pointer; font-size: 12px; font-weight: bold;
+      transition: all 0.15s;
+    }
+    button:hover { background: #30363d; border-color: #8b949e; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.primary { background: #1f6feb; border-color: #388bfd; color: #fff; }
+    button.primary:hover { background: #388bfd; }
+    button.success { background: #238636; border-color: #2ea043; color: #fff; font-size: 13px; }
+    button.success:hover { background: #2ea043; }
+    button.warning { background: #9e6a03; border-color: #d29922; color: #fff; }
+    button.warning:hover { background: #bb8009; }
+
+    input[type="range"] { width: 100%; accent-color: #58a6ff; margin-top: 6px; }
+    .stage-labels { display: flex; justify-content: space-between; font-size: 11px; color: #8b949e; margin-top: 4px; }
+
+    .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px; }
+    .stat-box { background: #161b22; padding: 8px; border-radius: 6px; border: 1px solid #21262d; }
+    .stat-label { font-size: 10px; color: #8b949e; }
+    .stat-val { font-size: 14px; font-weight: bold; margin-top: 2px; }
+
+    #bottleneck-list { list-style: none; font-size: 11px; max-height: 115px; overflow-y: auto; }
+    #bottleneck-list li {
+      display: flex; justify-content: space-between; padding: 5px 6px;
+      border-bottom: 1px solid #21262d; color: #c9d1d9;
+    }
+    #bottleneck-list li span.score { color: #ff7b72; font-weight: bold; }
+
+    .score-compare { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
+    .score-big { font-size: 19px; font-weight: bold; }
+
+    .legend-item { display: flex; align-items: center; gap: 8px; font-size: 11px; margin-top: 4px; color: #8b949e; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  </style>
+</head>
+<body>
+
+<div id="map-container">
+  <div id="hud-top">
+    <div class="hud-badge">FLOOD STAGE: <span id="hud-stage">0 / 4</span></div>
+    <div class="hud-badge">ROADS DROWNED: <span id="hud-drowned">0%</span></div>
+    <div class="hud-badge">RELIEF SHELTERS: <span id="hud-havens">0</span></div>
+    <div id="hud-alert" class="alert-pill">CLICK ANY SAFE ROAD OR AUTO-DROP</div>
+  </div>
+  <div id="mission-banner"></div>
+  <div id="map"></div>
+</div>
+
+<div id="sidebar">
+  <h2>Tactical Flood Command</h2>
+
+  <!-- 1. Interactive & Autonomous Evacuation Mission -->
+  <div class="card" style="border-color: #2ea043;">
+    <div class="card-title" style="color: #3fb950;">1. Evacuation Mission Control</div>
+    <div style="font-size: 11px; color: #8b949e; margin-bottom: 8px;">
+      <b>Click any dry road</b> on the map (or drag the Yellow Walker / click <b>Auto-Drop</b>) to place the walker, then start the run.
+    </div>
+    <button class="success" style="width:100%; padding: 10px;" id="btn-run-sim">▶ START SINGLE EVACUATION RUN</button>
+    <div class="btn-row">
+      <button id="btn-random-walker">🎲 Auto-Drop Walker</button>
+      <button id="btn-reset">↺ Reset Stage 0</button>
+      <button id="btn-audio">🔊 Siren: ON</button>
+    </div>
+    <div class="stat-grid">
+      <div class="stat-box">
+        <div class="stat-label">WALKER STATE</div>
+        <div class="stat-val" id="walker-status" style="color:#58a6ff;">READY</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">REMAINING DIST</div>
+        <div class="stat-val" id="walker-dist">-- m</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. 40-Round Evaluation & Accuracy Scoreboard -->
+  <div class="card" style="border-color: #388bfd;">
+    <div class="card-title" style="color: #58a6ff;">
+      <span>2. Walker Survival Accuracy (40-Round Eval)</span>
+      <span id="clear-stats" style="color:#8b949e; cursor:pointer; text-decoration:underline; font-size:10px;">Clear</span>
+    </div>
+    <div class="stat-grid">
+      <div class="stat-box">
+        <div class="stat-label">ROUNDS COMPLETED</div>
+        <div class="stat-val" id="cum-total-runs" style="color:#e6edf3;">0 / 40</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">WALKERS SAVED</div>
+        <div class="stat-val" id="cum-manual" style="color:#facc15;">0 Saved</div>
+      </div>
+    </div>
+    <div class="score-compare" style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #21262d;">
+      <div>
+        <div class="stat-label">PREDICTIVE AI ACCURACY</div>
+        <div class="score-big" id="cum-resilient" style="color:#3fb950;">0.0%</div>
+      </div>
+      <div style="text-align:right;">
+        <div class="stat-label">SHORTEST-ONLY BASELINE</div>
+        <div class="score-big" id="cum-naive" style="color:#ff7b72;">0.0%</div>
+      </div>
+    </div>
+    <div class="btn-row" style="margin-top: 10px;">
+      <button class="warning" id="btn-auto-40">🎬 Visual 40-Round Auto-Play</button>
+      <button class="primary" id="btn-batch">⚡ Instant 40-Round Eval</button>
+    </div>
+  </div>
+
+  <!-- 3. Flood Stage Scrubber -->
+  <div class="card">
+    <div class="card-title">3. Flood Water Level Timeline</div>
+    <input type="range" id="stage-slider" min="0" max="4" value="0" step="1" />
+    <div class="stage-labels">
+      <span>S0: River</span><span>S1: +0.45m</span><span>S2: +0.85m</span><span>S3: +1.4m</span><span>S4: +2.2m</span>
+    </div>
+  </div>
+
+  <!-- 4. Live Betweenness Centrality Bottlenecks -->
+  <div class="card">
+    <div class="card-title">4. Top Shifting Bottlenecks (EBC)</div>
+    <ul id="bottleneck-list"></ul>
+  </div>
+
+  <!-- Legend -->
+  <div class="card">
+    <div class="card-title">Map Legend</div>
+    <div class="legend-item"><span class="dot" style="background:#facc15;"></span> Free Walker (Click Map or Drag)</div>
+    <div class="legend-item"><span class="dot" style="background:#3fb950;"></span> High-Ground Safe Shelter</div>
+    <div class="legend-item"><span class="dot" style="background:#00ff88;"></span> Predictive Safe Escape Path</div>
+    <div class="legend-item"><span class="dot" style="background:#ff5555;"></span> Naive Shortest Path (Dashed)</div>
+    <div class="legend-item"><span class="dot" style="background:#f0883e;"></span> Danger Road (Submerges Next Stage)</div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  let map, graphData, nodeMap = {}, edgeLenMap = {}, currentStage = 0, simInterval = null, audioEnabled = true;
+  let edgeLayers = [], havenLayer = L.layerGroup(), floodLayer = L.layerGroup(), bottleneckLayer = L.layerGroup(), trialMarkersLayer = L.layerGroup();
+  let safeRouteLine = null, naiveRouteLine = null, walkerTrailLine = null;
+  let walkerMarker = null, currentWalkerNode = null, initialSpawnNode = null, currentPlannedPath = [], walkedCoords = [];
+  let tickCounter = 0, walkerReachedShelter = false;
+  let autoEvalActive = false, autoEvalRemaining = 0;
+
+  // Synchronized speed: 5 ticks per flood stage * 700m/tick = 3500m per stage (matches backend)
+  const TICKS_PER_STAGE = 5;
+  let metersPerTick = 700.0;
+
+  let regionStats = JSON.parse(localStorage.getItem("begusarai_sim_stats_v2") || '{"totalTrials":0,"resilientWins":0,"naiveWins":0}');
+
+  function saveAndRenderStats() {
+    localStorage.setItem("begusarai_sim_stats_v2", JSON.stringify(regionStats));
+    document.getElementById("cum-total-runs").innerText = `${regionStats.totalTrials} Rounds`;
+    document.getElementById("cum-manual").innerText = `${regionStats.resilientWins} Saved`;
+
+    const rPct = regionStats.totalTrials > 0 ? ((regionStats.resilientWins / regionStats.totalTrials) * 100).toFixed(1) : "0.0";
+    const nPct = regionStats.totalTrials > 0 ? ((regionStats.naiveWins / regionStats.totalTrials) * 100).toFixed(1) : "0.0";
+    document.getElementById("cum-resilient").innerText = `${rPct}%`;
+    document.getElementById("cum-naive").innerText = `${nPct}%`;
+  }
+
+  document.getElementById("clear-stats").addEventListener("click", () => {
+    regionStats = { totalTrials: 0, resilientWins: 0, naiveWins: 0 };
+    trialMarkersLayer.clearLayers();
+    saveAndRenderStats();
+  });
+
+  function playAlertBeep(freq = 620, duration = 0.2) {
+    if (!audioEnabled) return;
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(freq, ctx.currentTime);
+      gain.gain.setValueAtTime(0.06, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + duration);
+    } catch (e) {}
+  }
+
+  function edgeKey(u, v) {
+    return u < v ? `${u}__${v}` : `${v}__${u}`;
+  }
+
+  async function init() {
+    saveAndRenderStats();
+    const res = await fetch("/api/graph_init");
+    graphData = await res.json();
+    metersPerTick = (graphData.meters_per_stage || 3500.0) / TICKS_PER_STAGE;
+
+    graphData.nodes.forEach(n => { nodeMap[n.id] = n; });
+    graphData.edges.forEach(e => { edgeLenMap[edgeKey(e.u, e.v)] = e; });
+
+    map = L.map("map").setView(graphData.center, 11);
+    L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}", {
+      attribution: "Tiles © Esri"
+    }).addTo(map);
+
+    floodLayer.addTo(map);
+    trialMarkersLayer.addTo(map);
+    havenLayer.addTo(map);
+    bottleneckLayer.addTo(map);
+
+    document.getElementById("hud-havens").innerText = graphData.total_havens;
+
+    graphData.nodes.filter(n => n.is_haven).forEach(n => {
+      L.circleMarker([n.lat, n.lon], {
+        radius: 5.5, color: "#3fb950", fillColor: "#3fb950", fillOpacity: 0.95, weight: 1.5
+      }).bindTooltip("High-Ground Safe Shelter").addTo(havenLayer);
+    });
+
+    graphData.edges.forEach(e => {
+      const line = L.polyline([[e.lat1, e.lon1], [e.lat2, e.lon2]], {
+        color: "#388bfd", weight: 1.5, opacity: 0.65
+      }).addTo(map);
+      edgeLayers.push({ meta: e, layer: line });
+    });
+
+    // Click anywhere on the map to drop the walker onto the nearest safe road node
+    map.on("click", async (e) => {
+      stopSimulation(true);
+      hideBanner();
+      if (currentStage !== 0) await updateStage(0);
+      const snapped = findNearestDryNode(e.latlng.lat, e.latlng.lng);
+      if (snapped) {
+        document.getElementById("hud-alert").innerText = "WALKER DROPPED ON SAFE ROAD";
+        document.getElementById("hud-alert").className = "alert-pill";
+        await placeWalker(snapped, true);
+      }
+    });
+
+    await updateStage(0);
+    dropRandomSafeWalker();
+  }
+
+  function findNearestDryNode(lat, lon) {
+    let best = null, bestDist = Infinity;
+    graphData.nodes.forEach(n => {
+      if (n.submerged_at > currentStage && !n.is_haven) {
+        const d = Math.hypot(n.lat - lat, n.lon - lon);
+        if (d < bestDist) { bestDist = d; best = n; }
+      }
+    });
+    return best;
+  }
+
+  async function dropRandomSafeWalker() {
+    const pool = graphData.nodes.filter(n => n.submerged_at >= 1 && n.submerged_at <= 4 && !n.is_haven);
+    const activePool = pool.length ? pool : graphData.nodes.filter(n => n.submerged_at > 0 && !n.is_haven);
+    if (activePool.length) {
+      const randNode = activePool[Math.floor(Math.random() * activePool.length)];
+      await placeWalker(randNode, true);
+    }
+  }
+
+  async function placeWalker(node, resetTrail = true) {
+    currentWalkerNode = node.id;
+    if (resetTrail) {
+      initialSpawnNode = node;
+      walkedCoords = [[node.lat, node.lon]];
+      if (walkerTrailLine) map.removeLayer(walkerTrailLine);
+    } else {
+      walkedCoords.push([node.lat, node.lon]);
+      if (walkerTrailLine) map.removeLayer(walkerTrailLine);
+      walkerTrailLine = L.polyline(walkedCoords, { color: "#facc15", weight: 3.5, opacity: 0.9 }).addTo(map);
+    }
+
+    const walkerIcon = L.divIcon({
+      className: "",
+      html: `<div style="width:20px;height:20px;background:#facc15;border:3px solid #000;border-radius:50%;box-shadow:0 0 14px #facc15;cursor:grab;"></div>`,
+      iconSize: [20, 20], iconAnchor: [10, 10]
+    });
+
+    if (!walkerMarker) {
+      walkerMarker = L.marker([node.lat, node.lon], { draggable: true, icon: walkerIcon }).addTo(map);
+      walkerMarker.on("dragend", async () => {
+        stopSimulation(true);
+        if (currentStage !== 0) await updateStage(0);
+        const pos = walkerMarker.getLatLng();
+        const snapped = findNearestDryNode(pos.lat, pos.lng);
+        if (snapped) {
+          await placeWalker(snapped, true);
+        }
+      });
+    } else {
+      walkerMarker.setLatLng([node.lat, node.lon]);
+    }
+    return await computeAndDrawRoutes();
+  }
+
+  async function computeAndDrawRoutes() {
+    if (!currentWalkerNode) return null;
+    const res = await fetch("/api/route", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ start_node: currentWalkerNode, stage: currentStage })
+    });
+    const data = await res.json();
+
+    if (safeRouteLine) map.removeLayer(safeRouteLine);
+    if (naiveRouteLine) map.removeLayer(naiveRouteLine);
+
+    const statusEl = document.getElementById("walker-status");
+    const distEl = document.getElementById("walker-dist");
+
+    statusEl.innerText = data.resilient.status;
+    if (data.resilient.status === "SAFE") {
+      statusEl.style.color = "#3fb950";
+      distEl.innerText = "0 m (SAFE)";
+      currentPlannedPath = [];
+      return "SAFE";
+    } else if (data.resilient.status === "SUBMERGED" || data.resilient.status === "TRAPPED") {
+      statusEl.style.color = "#ff7b72";
+      distEl.innerText = "TRAPPED";
+      currentPlannedPath = [];
+      return data.resilient.status;
+    }
+
+    statusEl.style.color = "#58a6ff";
+    distEl.innerText = data.resilient.distance_m + " m";
+    currentPlannedPath = data.resilient.path;
+
+    if (data.naive.coords && data.naive.coords.length > 1) {
+      naiveRouteLine = L.polyline(data.naive.coords, {
+        color: "#ff5555", weight: 2.5, dashArray: "6, 8", opacity: 0.7
+      }).addTo(map);
+    }
+
+    if (data.resilient.coords && data.resilient.coords.length > 1) {
+      safeRouteLine = L.polyline(data.resilient.coords, {
+        color: "#00ff88", weight: 4.5, opacity: 0.95
+      }).addTo(map);
+    }
+    return "ROUTING";
+  }
+
+  async function updateStage(stage) {
+    currentStage = parseInt(stage);
+    document.getElementById("stage-slider").value = currentStage;
+    document.getElementById("hud-stage").innerText = `${currentStage} / 4`;
+
+    floodLayer.clearLayers();
+    const activeFeatures = graphData.flood_geojson.features.filter(f => f.properties.stage === currentStage);
+    L.geoJSON(activeFeatures, {
+      style: { fillColor: "#0077ff", color: "#00aaff", weight: 1, fillOpacity: 0.32 }
+    }).addTo(floodLayer);
+
+    edgeLayers.forEach(item => {
+      const drownAt = item.meta.submerged_at;
+      if (drownAt <= currentStage) {
+        item.layer.setStyle({ color: "#f85149", opacity: 0.08, weight: 1 });
+      } else if (drownAt === currentStage + 1) {
+        item.layer.setStyle({ color: "#f0883e", opacity: 0.9, weight: 2.2 });
+      } else {
+        item.layer.setStyle({ color: "#388bfd", opacity: 0.65, weight: 1.5 });
+      }
+    });
+
+    const mRes = await fetch(`/api/stage_metrics/${currentStage}`);
+    const metrics = await mRes.json();
+    document.getElementById("hud-drowned").innerText = metrics.drowned_percent + "%";
+
+    bottleneckLayer.clearLayers();
+    const listEl = document.getElementById("bottleneck-list");
+    listEl.innerHTML = "";
+    metrics.top_bottlenecks.forEach((b, idx) => {
+      if (idx < 5) {
+        L.polyline([[b.lat1, b.lon1], [b.lat2, b.lon2]], {
+          color: "#ff007f", weight: 4, opacity: 0.85
+        }).bindTooltip(`Bottleneck #${idx+1} (EBC: ${b.centrality})`).addTo(bottleneckLayer);
+      }
+      const li = document.createElement("li");
+      li.innerHTML = `<span>#${idx+1} ${b.edge}</span><span class="score">${b.centrality}</span>`;
+      listEl.appendChild(li);
+    });
+
+    return await computeAndDrawRoutes();
+  }
+
+  function showBanner(text, type) {
+    const b = document.getElementById("mission-banner");
+    b.innerText = text;
+    b.className = type;
+    b.style.display = "block";
+  }
+
+  function hideBanner() {
+    document.getElementById("mission-banner").style.display = "none";
+  }
+
+  function stopSimulation(cancelAutoEval = false) {
+    if (simInterval) {
+      clearInterval(simInterval);
+      simInterval = null;
+    }
+    if (cancelAutoEval) {
+      autoEvalActive = false;
+      autoEvalRemaining = 0;
+      document.getElementById("btn-auto-40").innerText = "🎬 Visual 40-Round Auto-Play";
+    }
+    document.getElementById("btn-run-sim").innerText = "▶ START SINGLE EVACUATION RUN";
+  }
+
+  async function finalizeRound(survived) {
+    regionStats.totalTrials += 1;
+    if (survived) regionStats.resilientWins += 1;
+    saveAndRenderStats();
+
+    if (initialSpawnNode) {
+      L.circleMarker([initialSpawnNode.lat, initialSpawnNode.lon], {
+        radius: 4,
+        color: survived ? "#3fb950" : "#f85149",
+        fillColor: survived ? "#3fb950" : "#f85149",
+        fillOpacity: 0.85,
+        weight: 1
+      }).bindTooltip(survived ? "Saved" : "Drowned").addTo(trialMarkersLayer);
+    }
+
+    if (autoEvalActive && autoEvalRemaining > 1) {
+      autoEvalRemaining -= 1;
+      document.getElementById("btn-auto-40").innerText = `⏹ Stop Auto-Play (${40 - autoEvalRemaining}/40)`;
+      await updateStage(0);
+      await dropRandomSafeWalker();
+      startSingleRun(140); // Fast visual playback during 40-round auto-eval
+    } else if (autoEvalActive) {
+      autoEvalActive = false;
+      autoEvalRemaining = 0;
+      document.getElementById("btn-auto-40").innerText = "🎬 Visual 40-Round Auto-Play";
+      const pct = ((regionStats.resilientWins / regionStats.totalTrials) * 100).toFixed(1);
+      showBanner(`✅ 40-ROUND EVALUATION COMPLETE — OVERALL SAVE ACCURACY: ${pct}%`, "win");
+    }
+  }
+
+  function startSingleRun(tickDelayMs = 450) {
+    hideBanner();
+    tickCounter = 0;
+    walkerReachedShelter = false;
+    document.getElementById("btn-run-sim").innerText = "⏸ PAUSE SIMULATION";
+    const alertEl = document.getElementById("hud-alert");
+    alertEl.innerText = autoEvalActive
+      ? `AUTO-EVAL ROUND ${41 - autoEvalRemaining}/40 — EVACUATING...`
+      : "FLOOD RISING — PREDICTIVE ROUTING ACTIVE...";
+    alertEl.className = "alert-pill danger";
+
+    simInterval = setInterval(async () => {
+      tickCounter++;
+
+      // Advance flood stage every TICKS_PER_STAGE ticks (5 ticks * 700m = 3500m/stage)
+      if (tickCounter % TICKS_PER_STAGE === 0 && currentStage < 4) {
+        if (!autoEvalActive) playAlertBeep(740, 0.18);
+        const nextStage = currentStage + 1;
+        if (!walkerReachedShelter) {
+          alertEl.innerText = `STAGE ${nextStage}/4 SURGE! RE-EVALUATING SAFE PATH...`;
+        }
+        const stageStatus = await updateStage(nextStage);
+
+        if (!walkerReachedShelter && (stageStatus === "SUBMERGED" || stageStatus === "TRAPPED")) {
+          stopSimulation(false);
+          if (!autoEvalActive) {
+            playAlertBeep(220, 0.5);
+            alertEl.innerText = "WALKER DROWNED IN FLOOD";
+            showBanner(`❌ DROWNED AT STAGE ${nextStage}/4: FLOODWATERS CUT OFF ALL SAFE ROADS`, "loss");
+          }
+          await finalizeRound(false);
+          return;
+        }
+      }
+
+      // Advance walker along planned path using exact metersPerTick distance budget
+      if (!walkerReachedShelter) {
+        if (currentPlannedPath && currentPlannedPath.length > 1) {
+          let budget = metersPerTick;
+          let targetNode = null;
+
+          for (let i = 0; i < currentPlannedPath.length - 1; i++) {
+            const u = currentPlannedPath[i];
+            const v = currentPlannedPath[i + 1];
+            const edge = edgeLenMap[edgeKey(u, v)];
+            const segLen = edge ? edge.length : 100.0;
+
+            if ((edge && edge.submerged_at <= currentStage) || nodeMap[v].submerged_at <= currentStage) {
+              break;
+            }
+            if (budget >= segLen || i === 0) {
+              budget -= segLen;
+              targetNode = nodeMap[v];
+              if (targetNode.is_haven) break;
+            } else {
+              break;
+            }
+          }
+
+          if (targetNode) {
+            const moveStatus = await placeWalker(targetNode, false);
+            if (moveStatus === "SAFE") {
+              walkerReachedShelter = true;
+              if (!autoEvalActive) playAlertBeep(980, 0.25);
+              alertEl.innerText = "REACHED SAFE SHELTER — HOLDING THROUGH STAGE 4...";
+              alertEl.className = "alert-pill survived";
+            } else if (moveStatus === "SUBMERGED" || moveStatus === "TRAPPED") {
+              stopSimulation(false);
+              if (!autoEvalActive) {
+                playAlertBeep(220, 0.5);
+                alertEl.innerText = "WALKER DROWNED IN FLOOD";
+                showBanner(`❌ DROWNED AT STAGE ${currentStage}/4: NO DRY ESCAPE ROUTE LEFT`, "loss");
+              }
+              await finalizeRound(false);
+              return;
+            }
+          }
+        } else {
+          const st = await computeAndDrawRoutes();
+          if (st === "SAFE") {
+            walkerReachedShelter = true;
+          } else {
+            stopSimulation(false);
+            if (!autoEvalActive) {
+              playAlertBeep(220, 0.5);
+              showBanner(`❌ DROWNED AT STAGE ${currentStage}/4: TRAPPED BY FLOODWATERS`, "loss");
+            }
+            await finalizeRound(false);
+            return;
+          }
+        }
+      }
+
+      // Complete run after Stage 4 concludes
+      if (currentStage === 4 && (walkerReachedShelter || tickCounter >= TICKS_PER_STAGE * 5)) {
+        stopSimulation(false);
+        if (walkerReachedShelter) {
+          if (!autoEvalActive) {
+            alertEl.innerText = "SAVED! SURVIVED STAGE 4 PEAK FLOOD";
+            alertEl.className = "alert-pill survived";
+            showBanner("✅ SAVED: REACHED SAFE LOCATION BEFORE STAGE 4 ENDED!", "win");
+          }
+          await finalizeRound(true);
+        } else {
+          if (!autoEvalActive) {
+            alertEl.innerText = "FAILED TO REACH SHELTER BEFORE STAGE 4 ENDED";
+            showBanner("❌ FAILED: DID NOT REACH SAFE GROUND IN TIME", "loss");
+          }
+          await finalizeRound(false);
+        }
+      }
+    }, tickDelayMs);
+  }
+
+  document.getElementById("btn-run-sim").addEventListener("click", async () => {
+    if (simInterval) {
+      stopSimulation(true);
+      return;
+    }
+    if (currentStage > 0 && initialSpawnNode) {
+      await updateStage(0);
+      await placeWalker(initialSpawnNode, true);
+    }
+    startSingleRun(450);
+  });
+
+  document.getElementById("btn-auto-40").addEventListener("click", async () => {
+    if (autoEvalActive) {
+      stopSimulation(true);
+      return;
+    }
+    stopSimulation(true);
+    autoEvalActive = true;
+    autoEvalRemaining = 40;
+    await updateStage(0);
+    await dropRandomSafeWalker();
+    startSingleRun(140);
+  });
+
+  document.getElementById("stage-slider").addEventListener("input", e => {
+    stopSimulation(true);
+    updateStage(e.target.value);
+  });
+
+  document.getElementById("btn-reset").addEventListener("click", async () => {
+    stopSimulation(true);
+    hideBanner();
+    document.getElementById("hud-alert").innerText = "READY FOR NEW RUN";
+    document.getElementById("hud-alert").className = "alert-pill";
+    await updateStage(0);
+    if (initialSpawnNode) {
+      await placeWalker(initialSpawnNode, true);
+    }
+  });
+
+  document.getElementById("btn-audio").addEventListener("click", e => {
+    audioEnabled = !audioEnabled;
+    e.target.innerText = audioEnabled ? "🔊 Siren: ON" : "🔇 Siren: OFF";
+  });
+
+  document.getElementById("btn-random-walker").addEventListener("click", async () => {
+    stopSimulation(true);
+    hideBanner();
+    document.getElementById("hud-alert").innerText = "AUTO-DROPPED ON SAFE ROAD";
+    document.getElementById("hud-alert").className = "alert-pill";
+    await updateStage(0);
+    await dropRandomSafeWalker();
+  });
+
+  document.getElementById("btn-batch").addEventListener("click", async () => {
+    stopSimulation(true);
+    const btn = document.getElementById("btn-batch");
+    btn.disabled = true;
+    btn.innerText = "⏳ Running 40 Rounds...";
+    const res = await fetch("/api/batch_simulate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ num_agents: 40 })
+    });
+    const data = await res.json();
+    regionStats.totalTrials += data.total_agents;
+    regionStats.resilientWins += data.resilient_survived;
+    regionStats.naiveWins += data.naive_survived;
+
+    data.trials.forEach(t => {
+      L.circleMarker([t.lat, t.lon], {
+        radius: 4,
+        color: t.resilient_survived ? "#3fb950" : "#f85149",
+        fillColor: t.resilient_survived ? "#3fb950" : "#f85149",
+        fillOpacity: 0.85,
+        weight: 1
+      }).bindTooltip(t.resilient_survived ? "Saved" : "Drowned").addTo(trialMarkersLayer);
+    });
+
+    saveAndRenderStats();
+    btn.disabled = false;
+    btn.innerText = "⚡ Instant 40-Round Eval";
+    playAlertBeep(880, 0.25);
+    showBanner(`⚡ 40-ROUND BATCH EVAL: AI SAVED ${data.resilient_survived}/${data.total_agents} (${data.resilient_accuracy}%) vs NAIVE ${data.naive_accuracy}%`, "win");
+  });
+
+  init();
+</script>
+</body>
+</html>
