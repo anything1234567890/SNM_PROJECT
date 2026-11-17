@@ -5,6 +5,18 @@ import requests
 from shapely.geometry import shape, Polygon
 from satellite_extractor import fetch_satellite_image, extract_road_skeleton, skeleton_to_graph
 from metrics_and_viz import calculate_graph_metrics, export_graph_image
+import math
+
+# Top-level helper function (outside build_graph_for_place)
+def ensure_edge_lengths(G):
+    for u, v, data in G.edges(data=True):
+        if "length" not in data or data["length"] is None:
+            x1, y1 = float(G.nodes[u].get("x", 0)), float(G.nodes[u].get("y", 0))
+            x2, y2 = float(G.nodes[v].get("x", 0)), float(G.nodes[v].get("y", 0))
+            
+            dx = (x2 - x1) * 111320 * math.cos(math.radians((y1 + y2) / 2))
+            dy = (y2 - y1) * 110540
+            data["length"] = round(math.sqrt(dx * dx + dy * dy), 2)
 
 # --- ADD THESE 3 LINES HERE ---
 ox.settings.timeout = 60
@@ -97,6 +109,8 @@ def build_graph_for_place(place_data: dict, output_path: str = "output_graph.gra
             if isinstance(val, list):
                 data[key] = str(val)
 
+    ensure_edge_lengths(G)
+
     nx.write_graphml(G, output_path)
     print(f"\n[1/3] Successfully saved GraphML to '{output_path}'")
 
@@ -122,6 +136,8 @@ def build_graph_for_place(place_data: dict, output_path: str = "output_graph.gra
     print("=" * 50 + "\n")
 
     return G, metrics
+
+
 
 if __name__ == "__main__":
     user_query = input("Enter Indian place name (e.g. Kapashera, Delhi): ")
